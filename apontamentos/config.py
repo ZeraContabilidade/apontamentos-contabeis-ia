@@ -115,6 +115,8 @@ class Config:
     chave_api: str = ""                 # em memória: sempre a chave aberta
     modelo: str = MODELO_PADRAO
     esforco: str = ESFORCO_PADRAO
+    # só para chave de organização que não pertence a um workspace
+    workspace_id: str = ""
     porta: int = 8770
     pasta_saida: str = field(default_factory=pasta_saida_padrao)
     # dados do escritório (vão no documento)
@@ -159,6 +161,8 @@ class Config:
                 continue
             if isinstance(getattr(self, k), str):
                 v = "" if v is None else str(v)
+            if k == "workspace_id":
+                v = v.strip()
             setattr(self, k, v)
 
     def apagar_chave(self) -> None:

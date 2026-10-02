@@ -15,6 +15,9 @@ com a identidade visual do escritório, pronto para você decidir enviar ao clie
 3. Em **Configurações**, cole a chave da API da Anthropic
    (console.anthropic.com → API Keys), preencha os dados do escritório e do
    responsável que assina, e clique em **Testar a IA**.
+   Se o teste disser que a chave "não pertence a um workspace", crie a chave
+   dentro de um workspace (console.anthropic.com → Settings → Workspaces →
+   abra o workspace → API Keys) ou preencha o campo **Workspace ID**.
 
 Nas próximas vezes, use **`ABRIR.bat`**. Uma janela preta fica aberta enquanto
 o sistema está em uso; para fechar o sistema, feche essa janela.

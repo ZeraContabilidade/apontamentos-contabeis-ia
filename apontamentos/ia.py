@@ -77,7 +77,8 @@ class ErroIA(Exception):
 
 
 class Redator:
-    def __init__(self, chave: str, modelo: str, esforco: str = "medium", cliente=None):
+    def __init__(self, chave: str, modelo: str, esforco: str = "medium",
+                 workspace_id: str = "", cliente=None):
         self.modelo = modelo
         self.esforco = esforco
         self._reserva_ok = True
@@ -94,7 +95,9 @@ class Redator:
             raise ErroIA("A biblioteca 'anthropic' não está instalada. Rode "
                          "INSTALAR_E_ABRIR de novo.") from e
         self._anthropic = anthropic
-        self.cliente = anthropic.Anthropic(api_key=chave, timeout=90.0, max_retries=2)
+        cabecalhos = {"anthropic-workspace-id": workspace_id.strip()} if workspace_id.strip() else None
+        self.cliente = anthropic.Anthropic(api_key=chave, timeout=90.0, max_retries=2,
+                                           default_headers=cabecalhos)
 
     # ------------------------------------------------------------------
     def _pedido(self, conteudo: str) -> dict:
@@ -147,6 +150,11 @@ class Redator:
             if isinstance(e, a.APIConnectionError):
                 return "Sem conexão com a internet (ou a API está fora do ar)."
             if isinstance(e, a.APIStatusError):
+                if "workspace" in texto.lower():
+                    return ("Esta chave da API não pertence a um workspace. Crie uma chave "
+                            "dentro de um workspace no console da Anthropic (Settings > "
+                            "Workspaces > abra o workspace > API Keys) e cole aqui, ou "
+                            "informe o Workspace ID (começa com wrkspc_) em Configurações.")
                 if "credit" in texto.lower() or "billing" in texto.lower():
                     return "Sem crédito na conta da API da Anthropic."
                 if e.status_code >= 500:

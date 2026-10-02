@@ -204,14 +204,25 @@ def teste_pedido_real_da_biblioteca():
     srv = HTTPServer(("127.0.0.1", 0), _ApiFalsa)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
-        red = Redator("sk-teste", "claude-opus-5-5", "medium")
-        red.cliente = anthropic.Anthropic(api_key="sk-teste",
-                                          base_url=f"http://127.0.0.1:{srv.server_port}",
-                                          max_retries=0)
+        red = Redator("sk-teste", "claude-opus-5-5", "medium", "wrkspc_teste123")
+        red.cliente = red.cliente.with_options(base_url=f"http://127.0.0.1:{srv.server_port}",
+                                               max_retries=0)
         r = red.formalizar("nf 1234 sem comprovante", categoria="Documentação pendente")
         caminho, cab, corpo = _ApiFalsa.recebidos[-1]
         checar(caminho.startswith("/v1/messages"), "chama /v1/messages")
         checar("server-side-fallback-2026-07-01" in cab.get("anthropic-beta", ""), "cabeçalho beta da reserva")
+        checar(cab.get("anthropic-workspace-id") == "wrkspc_teste123", "Workspace ID enviado no cabeçalho")
+        red2 = Redator("sk-teste", "claude-opus-5-5", "medium", "")
+        red2.cliente = red2.cliente.with_options(base_url=f"http://127.0.0.1:{srv.server_port}",
+                                                 max_retries=0)
+        red2.formalizar("x")
+        checar("anthropic-workspace-id" not in {k.lower() for k in _ApiFalsa.recebidos[-1][1]},
+               "sem Workspace ID: cabeçalho não vai")
+        erro = anthropic.BadRequestError(
+            "This API key is not scoped to a workspace, so this request must include the "
+            "anthropic-workspace-id header", response=__import__("httpx2").Response(
+                400, request=__import__("httpx2").Request("POST", "http://x")), body=None)
+        checar("Workspace ID" in red._mensagem_erro(erro), "erro de workspace explicado")
         checar(corpo.get("fallbacks") == "default", "fallbacks=default no corpo")
         checar(corpo["model"] == "claude-opus-5-5", "modelo Opus 5.5")
         checar(corpo["output_config"]["format"]["schema"]["additionalProperties"] is False,
@@ -382,6 +393,7 @@ def teste_config():
     print("\n[configurações]")
     cfg = config.carregar()
     cfg.atualizar({"chave_api": "sk-ant-segredo", "modelo": "modelo-inexistente", "esforco": "low",
+                   "workspace_id": "  wrkspc_abc  ",
                    "escritorio_nome": "Zera", "campo_estranho": 1})
     config.salvar(cfg)
     bruto = json.loads(config.arquivo_config().read_text(encoding="utf-8"))
@@ -391,6 +403,7 @@ def teste_config():
     checar(lido.chave_api == "sk-ant-segredo", "chave lida de volta")
     checar(lido.modelo == config.MODELO_PADRAO, "modelo inválido ignorado")
     checar(lido.esforco == "low", "esforço salvo")
+    checar(lido.workspace_id == "wrkspc_abc", "Workspace ID salvo sem espaços")
     checar("chave_api" not in lido.publico() and lido.publico()["chave_configurada"],
            "a chave nunca vai para a página")
     lido.atualizar({"chave_api": ""})

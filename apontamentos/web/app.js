@@ -223,6 +223,7 @@ function vistaConfig() {
   const chave = el("input", { class: "campo", type: "password", autocomplete: "off",
     placeholder: c.chave_configurada ? "Chave já cadastrada (deixe em branco para manter)" : "sk-ant-..." });
   const modelo = select(Object.entries(c.modelos), c.modelo);
+  txt("workspace_id", "wrkspc_... (só se o teste pedir)");
   const esforco = select(Object.entries(c.esforcos), c.esforco);
   area("introducao", 5); f.introducao.value = c.introducao;
   area("encerramento", 4); f.encerramento.value = c.encerramento;
@@ -259,7 +260,8 @@ function vistaConfig() {
     el("div", { class: "cartao" }, el("h2", { text: "Inteligência artificial" }),
       el("div", { class: "grade" },
         campo("Chave da API da Anthropic", chave, "Crie em console.anthropic.com → API Keys. Fica gravada protegida pelo Windows.", true),
-        campo("Modelo", modelo), campo("Esforço de raciocínio", esforco)),
+        campo("Modelo", modelo), campo("Esforço de raciocínio", esforco),
+        campo("Workspace ID (opcional)", f.workspace_id, "Só preencha se a chave não for de um workspace e o teste pedir. Fica em console.anthropic.com > Settings > Workspaces.", true)),
       situacao,
       el("div", { class: "acoes espaco-cima" }, btTestar, c.chave_configurada ? btApagar : null)),
     el("div", { class: "cartao" }, el("h2", { text: "Escritório (vai no documento)" }),

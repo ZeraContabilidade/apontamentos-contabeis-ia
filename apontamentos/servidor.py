@@ -44,7 +44,7 @@ class Aplicacao:
         self.cfg = cfg or config.carregar()
         self._salvar_config = salvar_config
         self.fabrica_redator = fabrica_redator or (
-            lambda c: Redator(c.chave_api, c.modelo, c.esforco))
+            lambda c: Redator(c.chave_api, c.modelo, c.esforco, c.workspace_id))
         self._trava_cfg = threading.Lock()
 
     # ------------------------------------------------------------------
