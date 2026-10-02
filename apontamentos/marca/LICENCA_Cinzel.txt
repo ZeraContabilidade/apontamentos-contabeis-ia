@@ -1,0 +1,3 @@
+Cinzel (Cinzel-Bold.ttf, Cinzel-Medium.ttf)
+Copyright The Cinzel Project Authors (https://github.com/NDISCOVER/Cinzel)
+Licenciada sob a SIL Open Font License, versão 1.1: https://openfontlicense.org
