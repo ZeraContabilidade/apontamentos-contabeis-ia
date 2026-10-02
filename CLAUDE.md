@@ -18,6 +18,11 @@ Windows 10/11, Python 3.11+.
    local; a chave da API nunca volta para a página (`Config.publico`).
 5. Texto na página sempre como texto (`el(..., {text})`, nunca innerHTML).
 6. Não fazer chamada paga à API em teste.
+7. Uma tela só (`docs/`) para os dois modos: **servidor** (Windows, Python
+   responde `api/ping`) e **local** (iPhone/GitHub Pages: `local/servidor-local.js`
+   atende os mesmos endereços com IndexedDB). Regra nova vale nos dois lados:
+   `ia.js`, `conferencia.js` e `conteudo.js` são cópias das regras do Python e o
+   teste `teste_paridade_js` exige resultado idêntico.
 
 ## Estrutura
 
@@ -36,10 +41,18 @@ apontamentos/
   conferencia.py trava contra número inventado/sumido
   documento.py   montar_conteudo (comum) -> gerar_pdf (fpdf2) / gerar_docx
                  (python-docx, XML na ordem do padrão OOXML senão o Word recusa)
-  servidor.py    Aplicacao (regras) + HTTP (só biblioteca padrão)
-  web/           index.html, app.js, estilo.css (sem biblioteca externa, CSP)
-  marca/         logo, emblema, fontes Cinzel e Liberation Sans
-testes/teste_sistema.py  tudo, inclusive a tela no Chromium (playwright, opcional)
+  servidor.py    Aplicacao (regras) + HTTP (só biblioteca padrão); serve docs/;
+                 backup (GET /api/backup, POST /api/backup/importar), copiar_de
+docs/            a tela (também publicada pelo GitHub Pages, branch main /docs)
+  index.html, app.js, estilo.css   tela única, responsiva (celular: gaveta e abas)
+  manifest.webmanifest, sw.js      aplicativo instalável; sw nunca guarda /api/
+  local/         modo aplicativo: conteudo.js, conferencia.js, ia.js (fetch direto
+                 com anthropic-dangerous-direct-browser-access), servidor-local.js
+                 (IndexedDB), gerador-pdf.js (jsPDF), gerador-docx.js (docx)
+  vendor/        jspdf.umd.min.js 4.2.1, docx.min.js 9.8.1 (carregados só ao finalizar)
+  marca/         logo, emblema, ícones do app, fontes Cinzel e Liberation Sans
+testes/teste_sistema.py  tudo, inclusive a tela no Chromium (playwright, opcional),
+                 paridade Python x JS (node) e o aplicativo em tela de iPhone
 ```
 
 ## Ao mudar o código

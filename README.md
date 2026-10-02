@@ -31,10 +31,52 @@ o sistema está em uso; para fechar o sistema, feche essa janela.
    próximo enquanto a IA formaliza o anterior.
 3. Revise na lista: **Editar**, **Refazer com IA**, **Usar meu texto**,
    mudar a ordem ou excluir. A prévia à direita mostra o documento como vai sair.
-4. **Finalizar e gerar documento**: grava o DOCX e o PDF em
+4. **Finalizar e gerar**: grava o DOCX e o PDF em
    `Documentos\Apontamentos Contábeis\<Empresa>\` (a pasta pode ser trocada em
-   Configurações). Use **Baixar** ou **Abrir pasta**. Precisa mudar algo?
-   **Reabrir para edição** e gere de novo.
+   Configurações). Use **Baixar**, **Compartilhar** ou **Abrir pasta**. Precisa
+   mudar algo? **Reabrir para edição** e gere de novo.
+5. **Mensagem para o cliente**: texto pronto (montado só com o que está no
+   relatório) para copiar, mandar pelo WhatsApp ou por e-mail junto com o PDF.
+
+Mais recursos:
+
+- **Painel** com documentos em andamento, itens de prioridade alta em aberto e
+  finalizados no mês.
+- **Ditar** (🎤): fale o apontamento em vez de digitar (Safari no iPhone,
+  Chrome e Edge).
+- **Trazer de outro mês**: copia apontamentos de outra competência (o que
+  continua pendente). Ao criar o documento do mês seguinte de uma empresa, o
+  sistema já oferece.
+- **Backup** (Configurações): baixa um arquivo com todos os documentos (sem a
+  chave da API) e importa em outro aparelho: Windows ⇄ iPhone ⇄ iPad.
+
+## Usar no iPhone e no iPad
+
+O sistema também funciona como aplicativo, direto no navegador, sem instalar
+nada. Os dados ficam guardados no próprio aparelho e a IA é chamada direto
+dele; o PDF e o Word são gerados no aparelho.
+
+**Uma vez (quem administra o GitHub):** no repositório, abra **Settings →
+Pages**, em *Build and deployment* escolha **Deploy from a branch**, branch
+**main**, pasta **/docs**, e salve. Em alguns minutos o endereço fica no ar:
+
+    https://zeracontabilidade.github.io/apontamentos-contabeis-ia/
+
+**Em cada iPhone/iPad:**
+
+1. Abra o endereço acima no **Safari**.
+2. Toque em **Compartilhar** (quadrado com a seta) → **Adicionar à Tela de
+   Início**.
+3. Abra pelo ícone, vá em **Configurações** e cole a chave da API (fica só
+   naquele aparelho). Preencha os dados do escritório.
+
+Para levar os documentos entre aparelhos, use **Baixar backup** em um e
+**Importar backup** no outro. Se apagar os dados do Safari, os documentos do
+aparelho vão junto: faça backup de vez em quando.
+
+O mesmo endereço funciona em qualquer navegador (Android, Mac, outro
+computador). No Windows do escritório, continue usando o `ABRIR.bat`, que
+guarda os dados no computador.
 
 ## O que a IA pode e não pode fazer
 
@@ -58,6 +100,10 @@ protegida pelo Windows e só abre neste usuário, neste computador).
 
 O sistema só atende no próprio computador (127.0.0.1); ninguém da rede acessa.
 
+No iPhone/iPad (aplicativo), tudo fica no armazenamento do navegador daquele
+aparelho; nada vai para o GitHub. O único envio é o texto do apontamento para
+a API da Anthropic, quando a IA formaliza (igual ao programa do Windows).
+
 ## Para quem mantém o código
 
 Python 3.11+, só biblioteca padrão no servidor; `anthropic` (IA),
@@ -70,4 +116,5 @@ python testes/teste_sistema.py
 Termina com `RESULTADO: OK`. Detalhes técnicos em `CLAUDE.md`.
 
 Fontes incluídas: Cinzel e Liberation Sans, ambas sob a SIL Open Font License
-(ver `apontamentos/marca/LICENCA_*.txt`).
+(ver `docs/marca/LICENCA_*.txt`). Bibliotecas do aplicativo: jsPDF e docx,
+ambas sob licença MIT (ver `docs/vendor/LICENCAS.txt`).

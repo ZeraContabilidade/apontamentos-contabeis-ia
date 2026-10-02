@@ -17,14 +17,17 @@ import threading
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from . import __version__, config, documento
 from .base import CATEGORIAS, PRIORIDADES, Base, ErroBase
 from .ia import ErroIA, Redator
 
-PASTA_WEB = Path(__file__).resolve().parent / "web"
-PASTA_MARCA = Path(__file__).resolve().parent / "marca"
+# A tela (a mesma usada no iPhone, publicada pelo GitHub Pages) fica em docs/
+PASTA_WEB = Path(__file__).resolve().parent.parent / "docs"
+CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self'; "
+       "script-src 'self'; connect-src 'self' https://api.anthropic.com; "
+       "worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'")
 CABECALHO_SEGURANCA = "Apontamentos"
 CAMPOS_TEXTO = ("titulo", "texto", "providencia")
 
@@ -51,6 +54,7 @@ class Aplicacao:
     def estado(self) -> dict:
         return {
             "versao": __version__,
+            "modo": "servidor",
             "config": self.cfg.publico(),
             "categorias": CATEGORIAS,
             "prioridades": PRIORIDADES,
@@ -159,6 +163,17 @@ class Aplicacao:
         return {"documento": self.documento_completo(doc_id),
                 "arquivos": [str(a) for a in arquivos]}
 
+    def importar(self, dados: dict) -> dict:
+        try:
+            resultado = self.base.importar(dados)
+        except (TypeError, AttributeError, KeyError):
+            raise ErroPedido("Arquivo de backup inválido.")
+        return resultado
+
+    def copiar_de(self, doc_id: int, ids) -> dict:
+        n = self.base.copiar_apontamentos(doc_id, [int(i) for i in ids])
+        return {"copiados": n, "documento": self.documento_completo(doc_id)}
+
     def reabrir(self, doc_id: int) -> dict:
         self.base.reabrir(doc_id)
         return {"documento": self.documento_completo(doc_id)}
@@ -235,6 +250,8 @@ class Manipulador(BaseHTTPRequestHandler):
         tipo = mimetypes.guess_type(str(caminho))[0] or "application/octet-stream"
         if caminho.suffix == ".js":
             tipo = "text/javascript"
+        elif caminho.suffix == ".webmanifest":
+            tipo = "application/manifest+json"
         dados = caminho.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", tipo + ("; charset=utf-8" if tipo.startswith("text/") else ""))
@@ -245,9 +262,7 @@ class Manipulador(BaseHTTPRequestHandler):
             self.send_header("Content-Disposition",
                              f"attachment; filename*=UTF-8''{quote(baixar_como)}")
         else:
-            self.send_header("Content-Security-Policy",
-                             "default-src 'self'; img-src 'self' data:; "
-                             "style-src 'self'; script-src 'self'; frame-ancestors 'none'")
+            self.send_header("Content-Security-Policy", CSP)
         self.end_headers()
         self.wfile.write(dados)
 
@@ -262,19 +277,14 @@ class Manipulador(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         caminho = url.path
         try:
-            if caminho in ("/", "/index.html"):
-                return self._arquivo(PASTA_WEB / "index.html")
-            if caminho.startswith("/web/") or caminho.startswith("/marca/"):
-                pasta = PASTA_WEB if caminho.startswith("/web/") else PASTA_MARCA
-                nome = caminho.split("/", 2)[2]
-                alvo = (pasta / nome).resolve()
-                if alvo.parent != pasta.resolve() or not alvo.is_file():
-                    return self._json({"erro": "não encontrado"}, 404)
-                return self._arquivo(alvo)
+            if not caminho.startswith("/api/"):
+                return self._estatico(caminho)
             if caminho == "/api/ping":
                 return self._json({"app": "apontamentos", "versao": __version__})
             if caminho == "/api/estado":
                 return self._json(self.app.estado())
+            if caminho == "/api/backup":
+                return self._json(self.app.base.exportar())
             partes = caminho.strip("/").split("/")
             if len(partes) == 3 and partes[:2] == ["api", "documentos"]:
                 return self._json(self.app.documento_completo(int(partes[2])))
@@ -291,13 +301,22 @@ class Manipulador(BaseHTTPRequestHandler):
             traceback.print_exc()
             return self._json({"erro": f"Erro interno: {e}"}, 500)
 
+    def _estatico(self, caminho: str):
+        """Arquivos da tela (pasta docs). Nada fora dela é servido."""
+        nome = unquote(caminho).lstrip("/") or "index.html"
+        raiz = PASTA_WEB.resolve()
+        alvo = (raiz / nome).resolve()
+        if raiz not in alvo.parents or not alvo.is_file() or alvo.suffix in (".py", ".md"):
+            return self._json({"erro": "não encontrado"}, 404)
+        return self._arquivo(alvo)
+
     # POST ---------------------------------------------------------------
     def do_POST(self):
         if not self._host_local() or self.headers.get("X-Requested-With") != CABECALHO_SEGURANCA:
             return self._json({"erro": "Pedido recusado."}, 403)
         try:
             tamanho = int(self.headers.get("Content-Length") or 0)
-            if tamanho > 2_000_000:
+            if tamanho > 30_000_000:
                 return self._json({"erro": "Pedido grande demais."}, 413)
             corpo = json.loads(self.rfile.read(tamanho) or b"{}") if tamanho else {}
             if not isinstance(corpo, dict):
@@ -322,6 +341,8 @@ class Manipulador(BaseHTTPRequestHandler):
             return app.testar_ia()
         if p == ["api", "documentos"]:
             return app.criar_documento(corpo)
+        if p == ["api", "backup", "importar"]:
+            return app.importar(corpo)
         if len(p) >= 3 and p[:2] == ["api", "documentos"]:
             doc_id = int(p[2])
             acao = p[3] if len(p) > 3 else ""
@@ -338,6 +359,8 @@ class Manipulador(BaseHTTPRequestHandler):
                 return {"ok": True}
             if acao == "abrir_pasta":
                 return app.abrir_pasta(doc_id)
+            if acao == "copiar_de":
+                return app.copiar_de(doc_id, corpo.get("ids") or [])
         if len(p) >= 3 and p[:2] == ["api", "apontamentos"]:
             ap_id = int(p[2])
             acao = p[3] if len(p) > 3 else ""
