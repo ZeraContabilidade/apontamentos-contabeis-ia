@@ -52,6 +52,17 @@ Mais recursos:
 
 ## Usar no iPhone e no iPad
 
+**O jeito mais fácil: pelo link do Claude.** O escritório recebe um link do
+claude.ai. Abra no app do Claude (ou no Safari, entrando na conta do Claude)
+e pronto: não precisa de chave da API (a IA usa a conta do Claude) e os
+documentos ficam guardados na conta, iguais no iPhone, no iPad e no
+computador. Na primeira formalização o Claude pergunta se a página pode usar
+a IA: toque em **Permitir**. Para atualizar essa versão depois de mudar o
+código: `python ferramentas/montar_claude.py` e publicar de novo a pasta
+`claude/` no mesmo link.
+
+**Outro jeito: site do GitHub.**
+
 O sistema também funciona como aplicativo, direto no navegador, sem instalar
 nada. Os dados ficam guardados no próprio aparelho e a IA é chamada direto
 dele; o PDF e o Word são gerados no aparelho.

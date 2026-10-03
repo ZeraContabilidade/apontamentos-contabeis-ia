@@ -17,6 +17,10 @@ Histórico de versões
      voz; trazer apontamentos de outro mês; compartilhar o PDF e mensagem
      pronta para o cliente (WhatsApp/e-mail); backup para levar os
      documentos entre aparelhos; tela adaptada ao celular.
+2.1  versão que abre dentro do Claude por um link do claude.ai (iPhone,
+     iPad, computador): sem chave da API (usa a IA da conta) e com os
+     documentos guardados na conta, iguais em todos os aparelhos
+     (ferramentas/montar_claude.py). Confirmações dentro da página.
 """
 
-__version__ = "2.0"
+__version__ = "2.1"
