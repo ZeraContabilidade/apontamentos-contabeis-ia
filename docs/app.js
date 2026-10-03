@@ -9,11 +9,12 @@
    (textContent), nunca como HTML. */
 "use strict";
 
-const VERSAO_APP = "2.0";
+const VERSAO_APP = "2.1";
 window.VERSAO_APP = VERSAO_APP;
 
 const E = {
-  modo: "servidor",      // "servidor" (programa no Windows) ou "local" (aparelho)
+  modo: "servidor",      // "servidor" (Windows), "local" (aparelho) ou "claude" (link do claude.ai)
+  downloads: null,
   estado: null,
   doc: null,
   editando: new Map(),
@@ -51,6 +52,20 @@ const pad2 = (n) => String(n).padStart(2, "0");
 const nomeCurto = (caminho) => String(caminho).split(/[\\/]/).pop();
 
 async function detectarModo() {
+  // aberto dentro do Claude: dados na conta do usuário, IA da própria conta
+  if (window.claude && typeof window.claude.use === "function") {
+    try {
+      const [db, user, sample, downloads] = await Promise.all(
+        ["db", "user", "sample", "downloads"].map(n => window.claude.use(n).catch(() => null)));
+      const uid = user && user.id ? await user.id() : null;
+      if (db && uid) {
+        window.ServidorLocal.usarNuvem(db, uid);
+        if (sample) window.IA.usarClaude(sample);
+        E.downloads = downloads;
+        return "claude";
+      }
+    } catch (e) { /* cai no modo aplicativo */ }
+  }
   try {
     const r = await fetch("api/ping", { cache: "no-store" });
     const d = await r.json();
@@ -60,7 +75,7 @@ async function detectarModo() {
 }
 
 async function api(metodo, url, corpo) {
-  if (E.modo === "local") {
+  if (E.modo !== "servidor") {
     try {
       return await window.ServidorLocal.pedir(metodo, url, corpo);
     } catch (e) {
@@ -99,6 +114,7 @@ function carregarScript(src) {
   return _scripts[src];
 }
 async function prepararGeradores() {
+  if (window.jspdf && window.docx && window.GeradorPDF && window.GeradorDOCX) return;  // já vieram na página
   await Promise.all([carregarScript("vendor/jspdf.umd.min.js"), carregarScript("vendor/docx.min.js")]);
   await Promise.all([carregarScript("local/gerador-pdf.js"), carregarScript("local/gerador-docx.js")]);
 }
@@ -132,7 +148,13 @@ function ehEstreito() { return window.matchMedia("(max-width: 900px)").matches; 
 function ehIOS() { return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1); }
 function instalado() { return window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; }
 
-function baixarBlob(blob, nome) {
+async function baixarBlob(blob, nome) {
+  if (E.modo === "claude") {
+    if (!E.downloads) return aviso("Este aparelho não permite baixar arquivos por aqui.", "erro");
+    try { await E.downloads.save({ filename: nome, data: blob }); }
+    catch (e) { if (e && e.code !== "declined") aviso("Não consegui salvar o arquivo (" + (e.code || "erro") + ").", "erro"); }
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const a = el("a", { href: url, download: nome });
   document.body.append(a);
@@ -154,6 +176,24 @@ function abrirModal(titulo, ...conteudo) {
   return fechar;
 }
 
+/* pergunta dentro da página (no Claude o confirm() do navegador não aparece) */
+function confirmar(texto, rotuloSim) {
+  return new Promise((ok) => {
+    let respondeu = false;
+    const fechar = abrirModal("Confirme",
+      el("p", { text: texto }),
+      el("div", { class: "acoes espaco-cima" },
+        el("button", { class: "bt bt-ouro", type: "button", text: rotuloSim || "Confirmar",
+                       onclick: () => { respondeu = true; fechar(); ok(true); } }),
+        el("button", { class: "bt", type: "button", text: "Cancelar", onclick: () => { fechar(); } })));
+    const m = $("#modal");
+    const obs = new MutationObserver(() => {
+      if (m.classList.contains("oculto")) { obs.disconnect(); if (!respondeu) ok(false); }
+    });
+    obs.observe(m, { attributes: true, attributeFilter: ["class"] });
+  });
+}
+
 /* menu lateral (no celular vira gaveta) ---------------------------------- */
 function abrirMenu(abrir) {
   document.body.classList.toggle("menu-aberto", abrir);
@@ -162,10 +202,13 @@ function abrirMenu(abrir) {
 /* estado geral ------------------------------------------------------------ */
 async function carregarEstado() {
   E.estado = await api("GET", "api/estado");
-  $("#versao").textContent = "versão " + (E.estado.versao || VERSAO_APP) + (E.modo === "local" ? " · aplicativo" : "");
+  $("#versao").textContent = "versão " + (E.estado.versao || VERSAO_APP) + ({ local: " · aplicativo", claude: " · no Claude" }[E.modo] || "");
   const cfg = E.estado.config;
   const selo = $("#selo-ia");
-  if (cfg.chave_configurada) {
+  if (E.modo === "claude" && cfg.ia_do_claude) {
+    selo.className = "selo-ia ok";
+    selo.textContent = "IA da sua conta Claude";
+  } else if (cfg.chave_configurada) {
     selo.className = "selo-ia ok";
     selo.textContent = "IA ativa · " + (cfg.modelos[cfg.modelo] || cfg.modelo).split(" (")[0].replace("Claude ", "");
   } else {
@@ -222,9 +265,11 @@ function vistaInicio() {
   const tile = (n, rot, classe) => el("div", { class: "tile " + (classe || "") }, el("b", { text: String(n) }), el("span", { text: rot }));
 
   const avisosTopo = [];
-  if (!cfg.chave_configurada)
+  if (!cfg.chave_configurada && E.modo !== "claude")
     avisosTopo.push(el("div", { class: "faixa-aviso" }, "A IA ainda não está configurada: os apontamentos ficam com o seu texto. ",
       el("button", { class: "bt-link", type: "button", text: "Configurar agora", onclick: () => { location.hash = "#/config"; } })));
+  if (E.modo === "claude" && !cfg.ia_do_claude)
+    avisosTopo.push(el("div", { class: "faixa-aviso" }, "A IA do Claude não está liberada para esta página. Recarregue e toque em Permitir quando o Claude perguntar."));
   if (E.modo === "local" && ehIOS() && !instalado())
     avisosTopo.push(el("div", { class: "faixa-aviso" }, "Dica: instale como aplicativo. No Safari, toque em Compartilhar e depois em \"Adicionar à Tela de Início\"."));
 
@@ -343,7 +388,7 @@ function vistaConfig() {
     finally { btTestar.disabled = false; btTestar.textContent = "Testar a IA"; }
   } });
   const btApagar = el("button", { class: "bt bt-perigo", type: "button", text: "Remover chave", onclick: async () => {
-    if (!confirm("Remover a chave da API deste aparelho?")) return;
+    if (!(await confirmar("Remover a chave da API deste aparelho?", "Remover"))) return;
     await api("POST", "api/config/apagar_chave");
     await carregarEstado(); vistaConfig(); aviso("Chave removida.", "ok");
   } });
@@ -378,7 +423,7 @@ function vistaConfig() {
       const dados = await api("GET", "api/backup");
       const nome = "apontamentos-backup-" + new Date().toISOString().slice(0, 10) + ".json";
       const blob = new Blob([JSON.stringify(dados, null, 1)], { type: "application/json" });
-      if (!(await compartilharArquivo(blob, nome, "Backup dos apontamentos"))) baixarBlob(blob, nome);
+      if (!(await compartilharArquivo(blob, nome, "Backup dos apontamentos"))) await baixarBlob(blob, nome);
     } catch (e) { aviso(e.message, "erro"); }
   } });
 
@@ -389,7 +434,12 @@ function vistaConfig() {
       el("li", { text: "Pronto: o ícone da Zera fica na tela e o sistema abre como aplicativo, até sem internet (a IA precisa de internet)." })),
     el("p", { class: "dica", text: "Os documentos ficam guardados neste aparelho. Para levar para outro aparelho ou para o Windows, use o backup abaixo." })) : null;
 
-  $("#principal").replaceChildren(el("div", { class: "estreito" },
+  const cartaoIA = E.modo === "claude" ? el("div", { class: "cartao" }, el("h2", { text: "Inteligência artificial" }),
+      el("p", { text: c.ia_do_claude ?
+        "A IA usa a sua própria conta do Claude: não precisa de chave da API. Na primeira formalização o Claude pergunta se esta página pode usar a IA; toque em Permitir." :
+        "A IA do Claude não está liberada para esta página. Recarregue a página e toque em Permitir quando o Claude perguntar." }),
+      el("p", { class: "dica", text: "Os documentos ficam guardados na sua conta do Claude e aparecem iguais no iPhone, no iPad e no computador, sempre pelo mesmo link." }),
+      el("div", { class: "acoes espaco-cima" }, c.ia_do_claude ? btTestar : null)) :
     el("div", { class: "cartao" }, el("h2", { text: "Inteligência artificial" }),
       el("div", { class: "grade" },
         campo("Chave da API da Anthropic", chave, "Crie em console.anthropic.com → Settings → Workspaces → abra o workspace → API Keys." +
@@ -397,7 +447,10 @@ function vistaConfig() {
         campo("Modelo", modelo), campo("Esforço de raciocínio", esforco),
         campo("Workspace ID (opcional)", f.workspace_id, "Só preencha se a chave não for de um workspace e o teste pedir.", true)),
       situacao,
-      el("div", { class: "acoes espaco-cima" }, btTestar, c.chave_configurada ? btApagar : null)),
+      el("div", { class: "acoes espaco-cima" }, btTestar, c.chave_configurada ? btApagar : null));
+
+  $("#principal").replaceChildren(el("div", { class: "estreito" },
+    cartaoIA,
     el("div", { class: "cartao" }, el("h2", { text: "Escritório (vai no documento)" }),
       el("div", { class: "grade" },
         campo("Nome do escritório", txt("escritorio_nome")),
@@ -418,7 +471,7 @@ function vistaConfig() {
       el("button", { class: "bt bt-ouro", type: "button", text: "Salvar configurações", onclick: salvar }),
       el("button", { class: "bt", type: "button", text: "Voltar", onclick: () => history.back() })),
     el("div", { class: "cartao espaco-cima" }, el("h2", { text: "Backup e outros aparelhos" }),
-      el("p", { class: "dica", text: "O backup leva todos os documentos e apontamentos (sem a chave da API). Abra o arquivo em outro aparelho, no Windows ou no iPhone, com \"Importar backup\"." }),
+      el("p", { class: "dica", text: "O backup leva todos os documentos e apontamentos (sem a chave da API). Serve para passar do link do Claude ou do iPhone para o Windows e vice-versa. Abra o arquivo em outro aparelho, no Windows ou no iPhone, com \"Importar backup\"." }),
       el("div", { class: "acoes" }, btBackup,
         el("button", { class: "bt", type: "button", text: "Importar backup", onclick: () => arquivo.click() }), arquivo)),
     instrucaoInstalar));
@@ -497,7 +550,7 @@ function montarEsqueletoDoc() {
 /* ditado por voz (Safari no iPhone, Chrome e Edge) */
 function botaoDitado(alvo) {
   const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!Rec) return null;
+  if (!Rec || E.modo === "claude") return null;
   const bt = el("button", { class: "bt bt-mini bt-mic", type: "button", title: "Ditar o apontamento", text: "🎤 Ditar" });
   bt.addEventListener("click", () => {
     if (E.ditado) { E.ditado.stop(); return; }
@@ -589,7 +642,8 @@ function desenharAcoes(doc) {
 
 /* arquivos gerados: baixar, compartilhar, mensagem ao cliente ---------- */
 async function obterArquivo(docId, fmt) {
-  if (E.modo === "local") return api("GET", "api/arquivo?doc=" + docId + "&fmt=" + fmt);
+  if (E.modo !== "servidor") await prepararGeradores();
+  if (E.modo !== "servidor") return api("GET", "api/arquivo?doc=" + docId + "&fmt=" + fmt);
   const r = await fetch("api/arquivo?doc=" + docId + "&fmt=" + fmt);
   if (!r.ok) throw new Error("Arquivo não encontrado. Gere o documento de novo.");
   const nome = (E.doc.arquivos || []).map(nomeCurto).find(n => n.toLowerCase().endsWith("." + fmt)) || ("apontamentos." + fmt);
@@ -597,7 +651,7 @@ async function obterArquivo(docId, fmt) {
 }
 
 async function compartilharArquivo(blob, nome, titulo) {
-  if (!navigator.canShare) return false;
+  if (!navigator.canShare || E.modo === "claude") return false;
   const tipo = nome.endsWith(".pdf") ? "application/pdf" : nome.endsWith(".json") ? "application/json" :
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   const arq = new File([blob], nome, { type: tipo });
@@ -655,12 +709,12 @@ function desenharFaixaFinal(doc) {
   const faixa = $("#faixa-final");
   if (doc.status !== "finalizado") { faixa.replaceChildren(); return; }
   const fmts = ["pdf", "docx"].filter(f => (doc.arquivos || []).some(a => a.toLowerCase().endsWith("." + f)));
-  const podeCompartilhar = !!navigator.canShare;
+  const podeCompartilhar = !!navigator.canShare && E.modo !== "claude";
   const botoes = [];
   for (const f of fmts) {
     const rot = f === "pdf" ? "PDF" : "Word";
     botoes.push(el("button", { class: "bt bt-mini", type: "button", text: "Baixar " + rot, onclick: async () => {
-      try { const a = await obterArquivo(doc.id, f); baixarBlob(a.blob, a.nome); } catch (e) { aviso(e.message, "erro"); }
+      try { const a = await obterArquivo(doc.id, f); await baixarBlob(a.blob, a.nome); } catch (e) { aviso(e.message, "erro"); }
     } }));
     if (podeCompartilhar) botoes.push(el("button", { class: "bt bt-mini bt-ouro", type: "button", text: "Compartilhar " + rot, onclick: async () => {
       try {
@@ -684,8 +738,8 @@ function desenharFaixaFinal(doc) {
 }
 
 async function excluirDocumento() {
-  if (!confirm("Excluir este documento e todos os apontamentos dele?" +
-               (E.modo === "servidor" ? " Os arquivos já gerados continuam na pasta." : ""))) return;
+  if (!(await confirmar("Excluir este documento e todos os apontamentos dele?" +
+               (E.modo === "servidor" ? " Os arquivos já gerados continuam na pasta." : ""), "Excluir"))) return;
   try {
     await api("POST", "api/documentos/" + E.doc.id + "/excluir");
     E.doc = null;
@@ -703,12 +757,12 @@ async function finalizar(formatos) {
     return aviso("Aguarde a IA terminar os apontamentos em andamento.", "erro");
   if (E.editando.size) return aviso("Salve ou cancele a edição aberta antes de finalizar.", "erro");
   const comAviso = aps.filter(a => (a.avisos || []).some(x => !x.startsWith("Sugestão da IA") && !x.startsWith("Trazido de")));
-  if (comAviso.length && !confirm(comAviso.length + " apontamento(s) têm avisos de conferência " +
-      "(números ou IA indisponível). Gerar o documento assim mesmo?")) return;
+  if (comAviso.length && !(await confirmar(comAviso.length + " apontamento(s) têm avisos de conferência " +
+      "(números ou IA indisponível). Gerar o documento assim mesmo?", "Gerar assim mesmo"))) return;
   const fechar = abrirModal("Gerando o documento", el("p", null, el("span", { class: "carregando" }), "  Montando " +
     formatos.map(f => f === "pdf" ? "PDF" : "Word").join(" e ") + " com a identidade visual do escritório…"));
   try {
-    if (E.modo === "local") await prepararGeradores();
+    if (E.modo !== "servidor") await prepararGeradores();
     const r = await api("POST", "api/documentos/" + E.doc.id + "/finalizar", { formatos });
     fechar();
     aviso("Documento gerado: " + r.arquivos.map(nomeCurto).join(" e "), "ok", 7000);
@@ -861,8 +915,8 @@ function cartao(ap, i, total, final, pend) {
                      onclick: () => acao(ap.id, "mover", { direcao: -1 }) }),
       el("button", { class: "bt bt-mini", type: "button", text: "↓", title: "Descer", "aria-label": "Descer", disabled: i === total - 1 ? true : null,
                      onclick: () => acao(ap.id, "mover", { direcao: 1 }) }),
-      el("button", { class: "bt bt-mini bt-perigo", type: "button", text: "Excluir", onclick: () => {
-        if (confirm("Excluir o apontamento " + (i + 1) + "?")) acao(ap.id, "excluir", null, "Apontamento excluído.");
+      el("button", { class: "bt bt-mini bt-perigo", type: "button", text: "Excluir", onclick: async () => {
+        if (await confirmar("Excluir o apontamento " + (i + 1) + "?", "Excluir")) acao(ap.id, "excluir", null, "Apontamento excluído.");
       } }));
   }
   return el("div", { class: "ap " + situacao, id: "ap-" + ap.id, "data-modo": "leitura" },

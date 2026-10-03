@@ -51,6 +51,10 @@ docs/            a tela (também publicada pelo GitHub Pages, branch main /docs)
                  (IndexedDB), gerador-pdf.js (jsPDF), gerador-docx.js (docx)
   vendor/        jspdf.umd.min.js 4.2.1, docx.min.js 9.8.1 (carregados só ao finalizar)
   marca/         logo, emblema, ícones do app, fontes Cinzel e Liberation Sans
+ferramentas/montar_claude.py  gera claude/ (página única + marca/) para publicar como
+                 Artifact com capabilities db, user, sample, downloads: modo "claude"
+                 (dados em data/users/<id>/apontamentos, IA pela conta, sem chave;
+                 sem confirm(), microfone, compartilhar ou <a download> no Claude)
 testes/teste_sistema.py  tudo, inclusive a tela no Chromium (playwright, opcional),
                  paridade Python x JS (node) e o aplicativo em tela de iPhone
 ```

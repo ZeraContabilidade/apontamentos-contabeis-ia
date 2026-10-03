@@ -770,6 +770,8 @@ def teste_aplicativo():
 
             # finaliza: PDF e Word gerados no próprio aparelho
             pg.click("text=Finalizar e gerar")
+            pg.wait_for_selector(".modal >> text=avisos de conferência")
+            pg.click(".modal >> text=Gerar assim mesmo")
             pg.wait_for_selector(".faixa-final", timeout=30000)
             arquivos = {}
             for fmt, rot in (("pdf", "Baixar PDF"), ("docx", "Baixar Word")):
@@ -852,10 +854,204 @@ def teste_aplicativo():
         srv.server_close()
 
 
+_CLAUDE_FALSO = r"""
+(() => {
+  const CH = "claude-falso-db";
+  const ler = () => { try { return JSON.parse(localStorage.getItem(CH) || "{}"); } catch (e) { return {}; } };
+  const gravar = (m) => localStorage.setItem(CH, JSON.stringify(m));
+  const espera = () => new Promise(r => setTimeout(r, 5));
+  const snap = (path, v) => ({ id: path.split("/").pop(), exists: v !== undefined,
+                               data: () => (v === undefined ? undefined : Object.freeze(JSON.parse(JSON.stringify(v)))),
+                               metadata: { fromCache: false, hasPendingWrites: false } });
+  function checar(path, par) {
+    const n = path.split("/").length;
+    if ((n % 2 === 0) !== par) throw new TypeError("caminho com paridade errada: " + path);
+  }
+  function doc(path) {
+    checar(path, true);
+    return { id: path.split("/").pop(), path,
+      get: async () => { await espera(); return snap(path, ler()[path]); },
+      set: async (d) => { await espera(); if (JSON.stringify(d).length > 262144) throw { code: "invalid_argument" };
+                          const m = ler(); m[path] = JSON.parse(JSON.stringify(d)); gravar(m); },
+      update: async (d) => { const m = ler(); Object.assign(m[path], d); gravar(m); },
+      delete: async () => { await espera(); const m = ler(); delete m[path]; gravar(m); },
+      collection: (sub) => colecao(path + "/" + sub) };
+  }
+  function colecao(path, filtros, lim) {
+    checar(path, false);
+    filtros = filtros || [];
+    return { path,
+      where: (f, op, v) => colecao(path, filtros.concat([[f, op, v]]), lim),
+      orderBy: () => colecao(path, filtros, lim),
+      limit: (n) => colecao(path, filtros, n),
+      doc: (id) => doc(path + "/" + (id || Math.random().toString(36).slice(2))),
+      get: async () => {
+        await espera();
+        const m = ler();
+        const docs = Object.keys(m).filter(k => k.startsWith(path + "/") && k.split("/").length === path.split("/").length + 1)
+          .filter(k => filtros.every(([f, op, v]) => op === "==" && m[k][f] === v))
+          .slice(0, lim || 1000).map(k => snap(k, m[k]));
+        return { docs, size: docs.length, empty: !docs.length, docChanges: () => [], metadata: {} };
+      } };
+  }
+  const db = { doc, collection: (p) => colecao(p) };
+  window.__baixados = [];
+  window.__pedidosIA = [];
+  const sample = async () => { throw { code: "invalid_request" }; };
+  sample.json = async (pedido) => {
+    window.__pedidosIA.push(pedido);
+    await new Promise(r => setTimeout(r, 300));
+    const anot = pedido.split("Anotação do contador:\n").pop();
+    const r = { titulo: "Apontamento formalizado", texto: "Identificamos o seguinte ponto: " + anot + ".",
+                providencia: "Solicitamos a verificação do item.", pontos_a_confirmar: [] };
+    if (anot.includes("INVENTAR")) r.texto += " Multa de 20%.";
+    return r;
+  };
+  const downloads = { save: async ({ filename, data }) => {
+    const buf = new Uint8Array(await data.arrayBuffer());
+    let bin = ""; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    window.__baixados.push({ filename, b64: btoa(bin) });
+    return { status: "saved" };
+  } };
+  const user = { id: async () => "u1", isOwner: () => true };
+  const caps = { db, sample, downloads, user };
+  window.claude = { use: async (n) => { await espera(); return caps[n] || null; } };
+})();
+"""
+
+
+class _ServidorClaude(BaseHTTPRequestHandler):
+    """Faz o papel do claude.ai: serve a página montada, com o esqueleto que a publicação acrescenta."""
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        from urllib.parse import unquote, urlparse
+        caminho = unquote(urlparse(self.path).path).lstrip("/") or "index.html"
+        alvo = (RAIZ / "claude" / caminho).resolve()
+        if not alvo.is_file() or (RAIZ / "claude") not in alvo.parents:
+            self.send_response(404)
+            self.end_headers()
+            return
+        dados = alvo.read_bytes()
+        tipo = {".html": "text/html; charset=utf-8", ".png": "image/png", ".ttf": "font/ttf"}.get(alvo.suffix, "application/octet-stream")
+        if alvo.name == "index.html":
+            dados = (b'<!doctype html><html><head><meta charset=utf8><meta name=viewport '
+                     b'content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body>'
+                     + dados + b"</body></html>")
+        self.send_response(200)
+        self.send_header("Content-Type", tipo)
+        self.send_header("Content-Length", str(len(dados)))
+        self.end_headers()
+        self.wfile.write(dados)
+
+
+def teste_claude():
+    """A versão que abre dentro do Claude: sem chave, dados na conta, IA da conta."""
+    print("\n[versão dentro do Claude (link do claude.ai)]")
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  (pulado: playwright não instalado)")
+        return
+    sys.path.insert(0, str(RAIZ / "ferramentas"))
+    import montar_claude
+    pagina = montar_claude.montar()
+    checar(pagina.stat().st_size < 16_000_000, "página dentro do limite de tamanho")
+    texto = pagina.read_text(encoding="utf-8")
+    checar("<html" not in texto[:2000] and "<title>" in texto[:200], "página no formato da publicação")
+    from http.server import ThreadingHTTPServer
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _ServidorClaude)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_port}/"
+    erros = []
+    try:
+        with sync_playwright() as p:
+            caminho = os.environ.get("CHROMIUM") or ("/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
+                                                    if Path("/opt/pw-browsers/chromium-1194/chrome-linux/chrome").exists() else None)
+            nav = p.chromium.launch(executable_path=caminho) if caminho else p.chromium.launch()
+            ctx = nav.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True,
+                                  service_workers="block")
+            ctx.add_init_script(_CLAUDE_FALSO)
+            ctx.route("https://api.anthropic.com/**", lambda r: (erros.append("chamou a API direto"), r.abort()))
+            pg = ctx.new_page()
+            pg.on("pageerror", lambda e: erros.append(str(e)))
+            pg.on("console", lambda m: erros.append(m.text) if m.type == "error" and "404" not in m.text else None)
+            pg.on("dialog", lambda d: (erros.append("usou diálogo do navegador: " + d.message), d.dismiss()))
+            pg.goto(base)
+            pg.wait_for_selector(".painel")
+            checar("no Claude" in pg.inner_text("#versao"), "abre no modo Claude")
+            checar("IA da sua conta Claude" in pg.inner_text("#selo-ia") or pg.locator("text=configurar agora").count() == 0,
+                   "não pede chave da API")
+            checar(pg.locator("text=Configurar agora").count() == 0, "sem aviso de chave")
+            pg.click("#bt-config")
+            pg.wait_for_selector("text=A IA usa a sua própria conta do Claude")
+            checar(pg.locator("input[type=password]").count() == 0, "configurações sem campo de chave")
+            pg.locator("input.campo").nth(0).fill("Zera Contabilidade")
+            pg.click("text=Salvar configurações")
+            pg.wait_for_selector("text=Configurações salvas.")
+            pg.goto(base + "#/novo")
+            pg.fill("input[list=empresas-conhecidas]", "Clínica Teste Ltda")
+            pg.fill("input[type=month]", "2026-09")
+            pg.click("text=Criar documento")
+            pg.wait_for_selector("#novo-texto")
+            checar(pg.locator(".bt-mic").count() == 0, "sem ditado (microfone bloqueado no Claude)")
+            pg.fill("#novo-texto", "nf 777 sem boleto, valor 300,00")
+            pg.click("text=Adicionar apontamento")
+            pg.fill("#novo-texto", "INVENTAR item para excluir")
+            pg.click("text=Adicionar apontamento")
+            pg.wait_for_selector(".ap.formalizado >> nth=1", timeout=15000)
+            pedidos = pg.evaluate("window.__pedidosIA")
+            checar(len(pedidos) == 2 and "Não invente nada" in pedidos[0] and "Anotação do contador:\nnf 777" in pedidos[0],
+                   "IA da conta recebe as mesmas instruções")
+            checar("não está no que você escreveu" in pg.inner_text("#lista-ap"), "conferência de números no Claude")
+            pg.locator(".ap").nth(1).locator("button:has-text('Excluir')").click()
+            pg.wait_for_selector(".modal >> text=Excluir o apontamento 2?")
+            pg.click(".modal >> button:has-text('Excluir')")
+            pg.wait_for_function("document.querySelectorAll('.ap').length === 1")
+            checar(True, "excluir com confirmação dentro da página")
+            chaves = pg.evaluate("Object.keys(JSON.parse(localStorage.getItem('claude-falso-db')))")
+            checar(chaves and all(k.startswith("data/users/u1/apontamentos/") for k in chaves),
+                   "dados guardados só na área do próprio usuário")
+            pg.click("text=Finalizar e gerar")
+            pg.wait_for_selector(".faixa-final", timeout=30000)
+            checar(pg.locator("text=Compartilhar PDF").count() == 0, "sem botão de compartilhar (bloqueado no Claude)")
+            pg.click("text=Baixar PDF")
+            pg.wait_for_function("window.__baixados.length === 1")
+            import base64
+            from pypdf import PdfReader
+            b = pg.evaluate("window.__baixados[0]")
+            (TEMP / "claude.pdf").write_bytes(base64.b64decode(b["b64"]))
+            texto_pdf = "\n".join(x.extract_text() for x in PdfReader(str(TEMP / "claude.pdf")).pages)
+            checar(b["filename"].endswith(".pdf") and "Clínica Teste Ltda" in texto_pdf, "PDF salvo pelo Claude")
+            # reabre a página: os documentos continuam (na conta) e o arquivo é gerado de novo
+            pg.goto(base + "#/")
+            pg.reload()
+            pg.wait_for_selector(".painel")
+            checar("Clínica Teste Ltda" in pg.inner_text(".painel"), "documentos continuam ao reabrir")
+            pg.locator(".doc-recente").first.click()
+            pg.wait_for_selector(".faixa-final")
+            pg.click("text=Baixar Word")
+            pg.wait_for_function("window.__baixados.length === 1")
+            b = pg.evaluate("window.__baixados[0]")
+            (TEMP / "claude.docx").write_bytes(base64.b64decode(b["b64"]))
+            from docx import Document
+            checar("Identificamos o seguinte ponto: nf 777" in "\n".join(x.text for x in Document(str(TEMP / "claude.docx")).paragraphs),
+                   "Word gerado de novo depois de reabrir")
+            pg.screenshot(path=str(TEMP / "claude.png"))
+            nav.close()
+        checar(not erros, "sem erro de JavaScript na versão do Claude")
+        for e in erros[:5]:
+            print("        ", e)
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def main():
     for teste in (teste_conferencia, teste_redator, teste_pedido_real_da_biblioteca,
                   teste_config, teste_aplicacao, teste_servidor, teste_tela,
-                  teste_paridade_js, teste_aplicativo):
+                  teste_paridade_js, teste_aplicativo, teste_claude):
         try:
             teste()
         except Exception:

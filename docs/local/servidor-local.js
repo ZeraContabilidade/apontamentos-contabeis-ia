@@ -53,7 +53,50 @@
     return _banco;
   }
 
+  /* Dentro do Claude (link do claude.ai) os dados ficam na conta do usuário,
+     no banco do próprio artigo, em data/users/<id>/ (só ele enxerga). Este
+     adaptador imita as poucas operações do IndexedDB usadas abaixo, então
+     o resto do arquivo não muda. Os PDF/Word não vão para o banco (limite de
+     tamanho): ficam na memória e são gerados de novo quando preciso. */
+  let NUVEM = null;
+  function usarNuvem(db, uid) {
+    NUVEM = { raiz: db.doc("data/users/" + uid + "/apontamentos"), arquivos: new Map(), ultimo: 0 };
+    _banco = Promise.resolve({ nuvem: true, transaction: () => ({ objectStore: lojaNuvem }) });
+  }
+  const copia = (x) => JSON.parse(JSON.stringify(x));
+  function erroNuvem(e) {
+    const msg = e && e.code === "quota_exceeded" ? "O espaço para documentos está cheio. Exclua documentos antigos." :
+      "Não consegui acessar os documentos na sua conta (" + ((e && e.code) || "erro") + "). Tente de novo.";
+    return new ErroPedido(msg);
+  }
+  function novoId() {
+    NUVEM.ultimo = Math.max(NUVEM.ultimo + 1, Date.now() * 1000 + Math.floor(Math.random() * 1000));
+    return NUVEM.ultimo;
+  }
+  function lojaNuvem(nome) {
+    if (nome === "arquivo") {
+      const m = NUVEM.arquivos;
+      return {
+        get: async (k) => m.get(k),
+        put: async (v, k) => { m.set(k, v); return k; },
+        delete: async (k) => { m.delete(k); },
+      };
+    }
+    const col = NUVEM.raiz.collection(nome);
+    const lerTodos = (q) => q.limit(1000).get().then(r => r.docs.map(d => copia(d.data())), e => { throw erroNuvem(e); });
+    const gravar = (k, v) => col.doc(String(k)).set(copia(v)).then(() => k, e => { throw erroNuvem(e); });
+    return {
+      get: (k) => col.doc(String(k)).get().then(d => (d.exists ? copia(d.data()) : undefined), e => { throw erroNuvem(e); }),
+      put: (v, k) => gravar(k === undefined ? v.id : k, v),
+      add: (v) => { const id = novoId(); return gravar(id, Object.assign({}, v, { id })); },
+      delete: (k) => col.doc(String(k)).delete().catch(e => { throw erroNuvem(e); }),
+      getAll: () => lerTodos(col),
+      index: () => ({ getAll: (v) => lerTodos(col.where("documento_id", "==", v)) }),
+    };
+  }
+
   function prometer(req) {
+    if (req && typeof req.then === "function") return req;
     return new Promise((ok, falha) => {
       req.onsuccess = () => ok(req.result);
       req.onerror = () => falha(req.error);
@@ -62,6 +105,7 @@
 
   async function tx(lojas, modo, fn) {
     const db = await abrir();
+    if (db.nuvem) return fn(db.transaction(lojas, modo));
     return new Promise((ok, falha) => {
       const t = db.transaction(lojas, modo);
       let resultado;
@@ -95,7 +139,8 @@
   function publico(cfg) {
     const d = Object.assign({}, cfg);
     delete d.chave_api;
-    d.chave_configurada = !!cfg.chave_api;
+    d.chave_configurada = !!cfg.chave_api || !!NUVEM;
+    d.ia_do_claude = !!global.IA.claudeDisponivel;
     d.modelos = MODELOS;
     d.esforcos = ESFORCOS;
     d.local = true;
@@ -189,7 +234,7 @@
       if (!vistas.has(k)) vistas.set(k, { empresa: d.empresa, cnpj: d.cnpj || "" });
     }
     return {
-      versao: global.VERSAO_APP || "", modo: "local", config: publico(cfg),
+      versao: global.VERSAO_APP || "", modo: NUVEM ? "claude" : "local", config: publico(cfg),
       categorias: C.CATEGORIAS, prioridades: C.PRIORIDADES, documentos,
       empresas: [...vistas.values()],
     };
@@ -273,7 +318,7 @@
     if (doc.status !== "rascunho") throw new ErroPedido("Este documento já foi finalizado.");
     const cfg = await lerConfig();
     let novos, erro = "";
-    if (!cfg.chave_api) {
+    if (!cfg.chave_api && !global.IA.claudeDisponivel) {
       novos = { situacao: "sem_ia", texto: ap.original, titulo: "", providencia: "",
                 avisos: ["IA não configurada: o apontamento ficou com o seu texto. Cadastre a chave em Configurações para formalizar."] };
     } else {
@@ -418,8 +463,17 @@
 
   async function arquivo(docId, fmt) {
     const a = await tx(["arquivo"], "readonly", t => prometer(t.objectStore("arquivo").get(docId + ":" + fmt)));
-    if (!a) throw new ErroPedido("Arquivo não encontrado. Gere o documento de novo.", 404);
-    return a;   // {nome, blob}
+    if (a) return a;   // {nome, blob}
+    // não guardado (ou guardado só na memória e a página foi reaberta): gera de novo
+    const doc = await obterDoc(docId);
+    const nome = C.nomeArquivo(doc) + "." + fmt;
+    if (doc.status !== "finalizado" || !(doc.arquivos || []).includes(nome) || !global.GeradorPDF)
+      throw new ErroPedido("Arquivo não encontrado. Gere o documento de novo.", 404);
+    const c = C.montarConteudo(doc, await lerConfig());
+    const blob = fmt === "pdf" ? await global.GeradorPDF.gerar(c) : await global.GeradorDOCX.gerar(c);
+    const novo = { nome, blob };
+    await tx(["arquivo"], "readwrite", t => prometer(t.objectStore("arquivo").put(novo, docId + ":" + fmt)));
+    return novo;
   }
 
   /* backup ------------------------------------------------------------------ */
@@ -505,7 +559,7 @@
 
   async function testarIA() {
     const cfg = await lerConfig();
-    if (!cfg.chave_api) throw new ErroPedido("Cadastre a chave da API primeiro.");
+    if (!cfg.chave_api && !global.IA.claudeDisponivel) throw new ErroPedido("Cadastre a chave da API primeiro.");
     try {
       const r = await global.IA.formalizar(cfg, "nf 123 sem boleto", { categoria: "Documentação pendente" });
       return { ok: true, exemplo: r.texto };
@@ -555,5 +609,5 @@
     throw new ErroPedido("Endereço desconhecido.", 404);
   }
 
-  global.ServidorLocal = { pedir, ErroPedido };
+  global.ServidorLocal = { pedir, ErroPedido, usarNuvem };
 })(window);

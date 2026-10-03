@@ -103,8 +103,35 @@
     return dados;
   }
 
+  /* Dentro do Claude (link do claude.ai): a IA é a da conta de quem usa,
+     sem chave. Mesmas instruções; a resposta vem como JSON no texto. */
+  let amostra = null;
+  function usarClaude(sample) { amostra = sample; api.claudeDisponivel = !!sample; }
+
+  const ERROS_CLAUDE = {
+    not_granted: "Você não permitiu que esta página use o Claude. Recarregue a página e toque em Permitir.",
+    sampling_disabled: "O uso do Claude por páginas está desligado nesta conta.",
+    rate_limited: "Muitos pedidos seguidos ou limite de uso da sua conta atingido. Espere um pouco e tente de novo.",
+    session_expired: "Sua sessão no Claude expirou. Entre de novo e tente outra vez.",
+    refused: "A IA recusou este texto. O apontamento ficou com o seu texto original; edite manualmente se precisar.",
+    invalid_json: "A IA respondeu fora do formato esperado. Tente de novo.",
+    cancelled: "Pedido cancelado.",
+  };
+
+  async function viaClaude(conteudo) {
+    const pedido = INSTRUCOES + "\nResponda somente com um objeto JSON com os campos titulo (texto), " +
+      "texto (texto), providencia (texto) e pontos_a_confirmar (lista de textos). Nada fora do JSON.\n\n" +
+      "-----\n" + conteudo;
+    try {
+      return await amostra.json(pedido, { cache: false });
+    } catch (e) {
+      const code = e && e.code;
+      throw new ErroIA(ERROS_CLAUDE[code] || "Falha ao chamar a IA do Claude (" + (code || "erro") + "). Tente de novo.");
+    }
+  }
+
   async function formalizar(cfg, original, extra) {
-    if (!cfg.chave_api) throw new ErroIA("A chave da API não está configurada. Abra Configurações e cole a chave da Anthropic.");
+    if (!cfg.chave_api && !amostra) throw new ErroIA("A chave da API não está configurada. Abra Configurações e cole a chave da Anthropic.");
     extra = extra || {};
     const linhas = [
       extra.empresa ? "Empresa: " + extra.empresa : "",
@@ -117,6 +144,17 @@
     ];
     // campos não informados não entram; a linha em branco antes da anotação fica
     const conteudo = linhas.filter((x, i) => x !== "" || i === 6).join("\n");
+    let d;
+    if (amostra && !cfg.chave_api) {
+      d = await viaClaude(conteudo);
+      if (!d || typeof d !== "object") throw new ErroIA("A IA respondeu fora do formato esperado. Tente de novo.");
+    } else {
+      d = await viaApi(cfg, conteudo);
+    }
+    return tratar(d, original, extra);
+  }
+
+  async function viaApi(cfg, conteudo) {
     let resp;
     const tentarReserva = reservaOk && COM_RESERVA.includes(cfg.modelo);
     try {
@@ -131,8 +169,10 @@
       throw new ErroIA("A IA recusou este texto. O apontamento ficou com o seu texto original; edite manualmente se precisar.");
     if (resp.stop_reason === "max_tokens") throw new ErroIA("A resposta da IA veio cortada. Tente de novo.");
     const texto = (resp.content || []).filter(b => b.type === "text").map(b => b.text).join("");
-    let d;
-    try { d = JSON.parse(texto); } catch (e) { throw new ErroIA("A IA respondeu fora do formato esperado. Tente de novo."); }
+    try { return JSON.parse(texto); } catch (e) { throw new ErroIA("A IA respondeu fora do formato esperado. Tente de novo."); }
+  }
+
+  function tratar(d, original, extra) {
     const r = {
       titulo: limpo(d.titulo).replace(/\.+$/, ""),
       texto: limpo(d.texto),
@@ -145,5 +185,6 @@
     return r;
   }
 
-  global.IA = { formalizar, ErroIA, INSTRUCOES, ESQUEMA };
+  const api = { formalizar, ErroIA, INSTRUCOES, ESQUEMA, usarClaude, claudeDisponivel: false };
+  global.IA = api;
 })(typeof window !== "undefined" ? window : globalThis);
