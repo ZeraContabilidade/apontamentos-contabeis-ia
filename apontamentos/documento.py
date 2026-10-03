@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .base import MESES, PRIORIDADES, competencia_extenso
 
-MARCA = Path(__file__).resolve().parent / "marca"
+MARCA = Path(__file__).resolve().parent.parent / "docs" / "marca"
 LOGO = MARCA / "logo_claro.png"
 
 OURO = (168, 132, 63)

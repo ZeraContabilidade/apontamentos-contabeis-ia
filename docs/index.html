@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self' https://api.anthropic.com; worker-src 'self'; manifest-src 'self'">
+<title>Apontamentos Contábeis · Zera</title>
+<meta name="theme-color" content="#0E0E10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Apontamentos">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="marca/icone.png">
+<link rel="apple-touch-icon" href="marca/app-180.png">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<header class="topo">
+  <div class="marca">
+    <button id="bt-menu" class="bt-menu" type="button" aria-label="Abrir lista de documentos">☰</button>
+    <img src="marca/emblema.png" alt="" class="emblema">
+    <div>
+      <div class="marca-nome">Apontamentos Contábeis</div>
+      <div class="marca-sub">Zera Contabilidade · <span id="versao"></span></div>
+    </div>
+  </div>
+  <div class="topo-acoes">
+    <span id="selo-ia" class="selo-ia"></span>
+    <button id="bt-config" class="bt bt-escuro" type="button"><span class="so-largo">Configurações</span><span class="so-estreito" aria-label="Configurações">⚙</span></button>
+  </div>
+</header>
+
+<div class="corpo">
+  <aside class="lateral" id="lateral">
+    <button id="bt-inicio" class="bt bt-largo" type="button">Painel</button>
+    <button id="bt-novo" class="bt bt-ouro bt-largo" type="button">+ Novo documento</button>
+    <input id="busca" class="campo busca" type="search" placeholder="Buscar empresa…" autocomplete="off">
+    <div id="lista-docs" class="lista-docs"></div>
+  </aside>
+  <div id="veu" class="veu"></div>
+  <main id="principal" class="principal"></main>
+</div>
+
+<div id="modal" class="modal oculto" role="dialog" aria-modal="true"></div>
+<div id="avisos" class="toasts" aria-live="polite"></div>
+<script src="local/conteudo.js"></script>
+<script src="local/conferencia.js"></script>
+<script src="local/ia.js"></script>
+<script src="local/servidor-local.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
